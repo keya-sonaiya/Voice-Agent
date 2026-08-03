@@ -69,8 +69,11 @@ web_modules/
 .env
 .env.*
 !.env.example
-
+!.env.local.example
 # Python local state and test artifacts
+.venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
 .coverage
@@ -78,6 +81,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.db
+
+# Generated local retrieval index
+data/
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

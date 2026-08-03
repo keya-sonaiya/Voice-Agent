@@ -25,3 +25,9 @@
 - The package manager applies exact `postcss` and `sharp` overrides (8.5.25 and
   0.35.3) to remove the remaining audited transitive findings in Next's dependency
   tree. They are not new runtime features; they are security-only dependency patches.
+- `httpx` is pinned to 0.27.2 rather than the supplied 0.28.1 because the supplied
+  `ollama==0.4.4` client requires `httpx<0.28.0`, otherwise the exact manifests
+  cannot be installed together.
+- Windows uses `webrtcvad-wheels==2.0.14` in place of the source-only
+  `webrtcvad==2.0.10`. It exposes the same `webrtcvad` import used by the app while
+  avoiding a local C++ compilation for that package.
