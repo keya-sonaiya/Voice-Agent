@@ -22,3 +22,6 @@
 - Next.js is pinned to 16.2.12 rather than the supplied 15.1.3 because the latter has
   published critical and high-severity advisories. This exact, React-19-compatible
   version removes those production dependency findings.
+- The package manager applies exact `postcss` and `sharp` overrides (8.5.25 and
+  0.35.3) to remove the remaining audited transitive findings in Next's dependency
+  tree. They are not new runtime features; they are security-only dependency patches.

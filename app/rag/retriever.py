@@ -25,9 +25,12 @@ def _dense_documents(query: str, limit: int) -> list[str]:
     """Fetch dense matches from Chroma, with a local embedding fallback before ingest runs."""
     try:
         PersistentClient = import_module("chromadb").PersistentClient
+        SentenceTransformer = import_module("sentence_transformers").SentenceTransformer
         client = PersistentClient(path=settings.vector_db_path)
         collection = client.get_collection("support_kb")
-        result = collection.query(query_texts=[query], n_results=limit, include=["documents"])
+        model = SentenceTransformer(settings.embedding_model)
+        query_embedding = model.encode([query], normalize_embeddings=True).tolist()
+        result = collection.query(query_embeddings=query_embedding, n_results=limit, include=["documents"])
         documents = result.get("documents", [[]])
         if documents and documents[0]:
             return [str(item) for item in documents[0]]
