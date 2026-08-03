@@ -1,0 +1,1 @@
+"""Human queue payload construction."""
