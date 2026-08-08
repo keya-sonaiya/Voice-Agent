@@ -27,8 +27,10 @@ class InterruptibleSynthesizer:
         if settings.tts_provider != "coqui":
             raise RuntimeError("Only the configured local Coqui provider is available in this demo.")
         if self._engine is None:
-            self._engine = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False)
-        wav = self._engine.tts(text=text)
+            self._engine = await asyncio.to_thread(
+                TTS, model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False
+            )
+        wav = await asyncio.to_thread(self._engine.tts, text=text)
         buffer = BytesIO()
         sf.write(buffer, wav, 22050, format="WAV")
         data = buffer.getvalue()

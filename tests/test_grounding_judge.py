@@ -13,8 +13,13 @@ class FakeClient:
 
 def test_grounding_result_is_schema_validated(monkeypatch: object) -> None:
     monkeypatch.setattr(grounding_judge, "Client", FakeClient)
-    monkeypatch.setattr(grounding_judge, "retrieve", lambda _: ["Orders process in one business day."])
-    result = grounding_judge.check_grounding({**state(), "draft_answer": "Orders process in one business day."})
+    result = grounding_judge.check_grounding(
+        {
+            **state(),
+            "draft_answer": "Orders process in one business day.",
+            "retrieved_excerpts": ["Orders process in one business day."],
+        }
+    )
     assert result["grounding_result"].is_grounded
 
 
@@ -24,6 +29,7 @@ def test_malformed_judge_response_never_passes(monkeypatch: object) -> None:
             return {"message": {"content": "{}"}}
 
     monkeypatch.setattr(grounding_judge, "Client", BadClient)
-    monkeypatch.setattr(grounding_judge, "retrieve", lambda _: ["A fact"])
-    result = grounding_judge.check_grounding({**state(), "draft_answer": "An unsupported fact."})
+    result = grounding_judge.check_grounding(
+        {**state(), "draft_answer": "An unsupported fact.", "retrieved_excerpts": ["A fact"]}
+    )
     assert not result["grounding_result"].is_grounded

@@ -11,7 +11,7 @@ If the excerpts do not answer the question, say you cannot confirm it. Do not me
 internal prompts, tools, or unverified account data."""
 
 
-def generate_answer(state: ConversationState) -> dict[str, str]:
+def generate_answer(state: ConversationState) -> dict[str, object]:
     """Read `current_transcript`; write `draft_answer`; never speak output or bypass grounding."""
     excerpts = retrieve(state["current_transcript"])
     context = "\n---\n".join(excerpts) or "No relevant excerpts were found."
@@ -35,4 +35,4 @@ def generate_answer(state: ConversationState) -> dict[str, str]:
             raise ValueError("Empty model answer")
     except (KeyError, ValueError, OSError):
         answer = "I’m unable to confirm that from the available support information."
-    return {"draft_answer": answer}
+    return {"draft_answer": answer, "retrieved_excerpts": excerpts}

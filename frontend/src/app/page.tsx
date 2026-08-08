@@ -32,6 +32,7 @@ export default function Home() {
   const audioContext = useRef<AudioContext | null>(null);
   const microphoneStream = useRef<MediaStream | null>(null);
   const microphoneNode = useRef<ScriptProcessorNode | null>(null);
+  const microphoneMuteNode = useRef<GainNode | null>(null);
   const [draft, setDraft] = useState("");
   const [connected, setConnected] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -48,6 +49,7 @@ export default function Home() {
   useEffect(() => {
     return () => {
       microphoneNode.current?.disconnect();
+      microphoneMuteNode.current?.disconnect();
       microphoneStream.current?.getTracks().forEach((track) => track.stop());
       void audioContext.current?.close();
       socket.current?.close();
@@ -73,11 +75,18 @@ export default function Home() {
     if (socket.current?.readyState !== WebSocket.OPEN || microphoneActive)
       return;
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true },
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
     });
     const context = new AudioContext();
     const source = context.createMediaStreamSource(stream);
     const processor = context.createScriptProcessor(2048, 1, 1);
+    const muteNode = context.createGain();
+    muteNode.gain.value = 0;
     processor.onaudioprocess = (event) => {
       if (socket.current?.readyState === WebSocket.OPEN) {
         socket.current.send(
@@ -86,18 +95,24 @@ export default function Home() {
       }
     };
     source.connect(processor);
-    processor.connect(context.destination);
+    // Keep the processor alive without playing the caller's microphone back
+    // through their speakers, which can degrade recognition through feedback.
+    processor.connect(muteNode);
+    muteNode.connect(context.destination);
     microphoneStream.current = stream;
     microphoneNode.current = processor;
+    microphoneMuteNode.current = muteNode;
     audioContext.current = context;
     setMicrophoneActive(true);
   }
 
   function stopMicrophone() {
     microphoneNode.current?.disconnect();
+    microphoneMuteNode.current?.disconnect();
     microphoneStream.current?.getTracks().forEach((track) => track.stop());
     void audioContext.current?.close();
     microphoneNode.current = null;
+    microphoneMuteNode.current = null;
     microphoneStream.current = null;
     audioContext.current = null;
     if (socket.current?.readyState === WebSocket.OPEN) {
@@ -124,10 +139,11 @@ export default function Home() {
       const base =
         process.env.NEXT_PUBLIC_WS_GATEWAY_URL ??
         "ws://localhost:8000/ws/audio";
-      const ws = new WebSocket(
-        `${base}/${session_id}?token=${encodeURIComponent(token)}`,
-      );
-      ws.onopen = () => setConnected(true);
+      const ws = new WebSocket(`${base}/${session_id}`);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "auth", token }));
+        setConnected(true);
+      };
       ws.onclose = () => {
         setConnected(false);
         setMicrophoneActive(false);

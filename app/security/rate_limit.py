@@ -14,6 +14,9 @@ def enforce_rate_limit(key: str) -> bool:
     bucket = _requests[key]
     while bucket and now - bucket[0] > 60:
         bucket.popleft()
+    if not bucket:
+        _requests.pop(key, None)
+        bucket = _requests[key]
     if len(bucket) >= settings.rate_limit_per_minute:
         return False
     bucket.append(now)

@@ -1,6 +1,35 @@
 """Environment-backed application configuration."""
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import json
+from typing import Any, Literal
+
+from pydantic import field_validator
+from pydantic.fields import FieldInfo
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
+
+
+class _OriginEnvSettingsSource(EnvSettingsSource):
+    """Leave origin strings undecoded so the settings validator can parse CSV values."""
+
+    def prepare_field_value(self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool) -> Any:
+        if field_name == "allowed_origins" and isinstance(value, str):
+            return value
+        return super().prepare_field_value(field_name, field, value, value_is_complex)
+
+
+class _OriginDotEnvSettingsSource(DotEnvSettingsSource):
+    """Apply the same CSV handling to values loaded from `.env`."""
+
+    def prepare_field_value(self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool) -> Any:
+        if field_name == "allowed_origins" and isinstance(value, str):
+            return value
+        return super().prepare_field_value(field_name, field, value, value_is_complex)
 
 
 class Settings(BaseSettings):
@@ -17,6 +46,8 @@ class Settings(BaseSettings):
     sentiment_escalation_threshold: float = -0.4
     max_clarifications: int = 2
     whisper_model: str = "base.en"
+    whisper_device: Literal["auto", "cpu", "cuda"] = "auto"
+    whisper_compute_type: str = "int8"
     tts_provider: str = "coqui"
     elevenlabs_api_key: str | None = None
     vector_db_path: str = "./data/chroma"
@@ -26,6 +57,42 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["http://localhost:3000"]
     rate_limit_per_minute: int = 60
     max_call_duration_seconds: int = 900
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Use sources that preserve the documented CSV form of `ALLOWED_ORIGINS`."""
+        return (
+            init_settings,
+            _OriginEnvSettingsSource(settings_cls),
+            _OriginDotEnvSettingsSource(settings_cls),
+            file_secret_settings,
+        )
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def parse_allowed_origins(cls, value: Any) -> list[str]:
+        """Accept the documented comma-separated env value as well as a JSON array."""
+        if isinstance(value, list):
+            return value
+        if not isinstance(value, str):
+            raise ValueError("ALLOWED_ORIGINS must be a comma-separated string or list.")
+        text = value.strip()
+        if text.startswith("["):
+            decoded = json.loads(text)
+            if isinstance(decoded, list) and all(isinstance(item, str) for item in decoded):
+                return decoded
+            raise ValueError("ALLOWED_ORIGINS JSON value must contain only strings.")
+        origins = [origin.strip() for origin in text.split(",") if origin.strip()]
+        if not origins:
+            raise ValueError("ALLOWED_ORIGINS must include at least one origin.")
+        return origins
 
 
 # Pydantic reads these required values from its configured environment source at runtime.

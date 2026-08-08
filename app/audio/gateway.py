@@ -18,6 +18,7 @@ from app.graph.state import ConversationState, Turn
 from app.persistence.session_store import record_transition
 from app.security.auth import AuthenticationError, verify_call_token
 from app.security.input_guard import UnsafeTranscriptError, validate_transcript
+from app.security.rate_limit import enforce_rate_limit
 
 GRAPH = build_graph()
 
@@ -32,6 +33,7 @@ def initial_state(session_id: str) -> ConversationState:
         "rolling_sentiment": 0.0,
         "clarification_count": 0,
         "draft_answer": None,
+        "retrieved_excerpts": [],
         "grounding_result": None,
         "escalation_decision": None,
         "final_response_text": None,
@@ -48,14 +50,22 @@ async def _send_tts(websocket: WebSocket, synthesizer: InterruptibleSynthesizer,
         await websocket.send_json({"type": "tts_unavailable", "message": "Speech playback is temporarily unavailable."})
 
 
-async def serve_audio_socket(websocket: WebSocket, session_id: str, token: str) -> None:
+async def serve_audio_socket(websocket: WebSocket, session_id: str) -> None:
     """Run one authenticated audio call; all audio and speech share this WS connection."""
-    try:
-        verify_call_token(token, session_id)
-    except AuthenticationError:
+    origin = websocket.headers.get("origin")
+    if origin not in settings.allowed_origins:
         await websocket.close(code=1008)
         return
     await websocket.accept()
+    try:
+        first_message = await asyncio.wait_for(websocket.receive_json(), timeout=10)
+        token = first_message.get("token") if first_message.get("type") == "auth" else None
+        if not isinstance(token, str):
+            raise AuthenticationError("WebSocket authentication is required.")
+        verify_call_token(token, session_id)
+    except (AuthenticationError, asyncio.TimeoutError, ValueError):
+        await websocket.close(code=1008)
+        return
     state = initial_state(session_id)
     record_transition("session_started", state)
     started = monotonic()
@@ -84,6 +94,9 @@ async def serve_audio_socket(websocket: WebSocket, session_id: str, token: str) 
             await websocket.send_json({"type": "input_rejected", "message": str(error)})
             return
         async with process_lock:
+            if not enforce_rate_limit(f"session:{session_id}"):
+                await websocket.send_json({"type": "input_rejected", "message": "Transcript rate limit exceeded."})
+                return
             caller_turn = Turn(role="caller", text=transcript, timestamp=datetime.now(UTC))
             state = {
                 **state,
@@ -110,17 +123,24 @@ async def serve_audio_socket(websocket: WebSocket, session_id: str, token: str) 
 
     try:
         while True:
-            if monotonic() - started > settings.max_call_duration_seconds:
+            remaining = settings.max_call_duration_seconds - (monotonic() - started)
+            if remaining <= 0:
                 await websocket.send_json({"type": "call_terminated", "message": "Maximum call duration reached."})
                 await websocket.close(code=1008)
                 return
-            message: MutableMapping[str, Any] = await websocket.receive()
+            try:
+                message: MutableMapping[str, Any] = await asyncio.wait_for(websocket.receive(), timeout=remaining)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "call_terminated", "message": "Maximum call duration reached."})
+                await websocket.close(code=1008)
+                return
             if message.get("type") == "websocket.disconnect":
                 return
             audio = message.get("bytes")
             if isinstance(audio, bytes):
-                await stop_active_tts()
                 transcriber.add_audio(audio)
+                if transcriber.contains_speech(audio):
+                    await stop_active_tts()
                 continue
             text = message.get("text")
             if text is None:

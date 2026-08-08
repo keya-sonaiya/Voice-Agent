@@ -1,11 +1,12 @@
 """LangGraph assembly with audited persistence after every transition."""
 
+import logging
+
 from collections.abc import Callable
 from typing import Any, cast
 
 from langgraph.graph import END, StateGraph
 
-from app.config import settings
 from app.graph.nodes import (
     escalation_agent,
     grounding_judge,
@@ -17,6 +18,7 @@ from app.graph.state import ConversationState
 from app.persistence.session_store import record_transition
 
 Node = Callable[[ConversationState], dict[str, Any]]
+logger = logging.getLogger(__name__)
 
 
 def _persisted(name: str, node: Node) -> Node:
@@ -24,7 +26,10 @@ def _persisted(name: str, node: Node) -> Node:
         update = node(state)
         merged = dict(state)
         merged.update(update)
-        record_transition(name, cast(ConversationState, merged))
+        try:
+            record_transition(name, cast(ConversationState, merged))
+        except Exception:
+            logger.exception("persistence_write_failed node=%s session_id=%s", name, state["session_id"])
         return update
 
     return wrapped
@@ -32,22 +37,14 @@ def _persisted(name: str, node: Node) -> Node:
 
 def route_after_intent(state: ConversationState) -> str:
     """Send any low-confidence or human-request intent to deterministic escalation."""
-    intent = state["intent_result"]
-    if (
-        intent is None
-        or intent.confidence < settings.confidence_threshold
-        or intent.intent == "human_request"
-        or state["clarification_count"] > settings.max_clarifications
-    ):
-        return "escalation"
-    return "sentiment"
+    decision = escalation_agent.decide_escalation(state)["escalation_decision"]
+    return "escalation" if decision.should_escalate else "sentiment"
 
 
 def route_after_sentiment(state: ConversationState) -> str:
     """Stop before RAG when the caller's rolling sentiment crosses the configured threshold."""
-    if state["rolling_sentiment"] < settings.sentiment_escalation_threshold:
-        return "escalation"
-    return "knowledge"
+    decision = escalation_agent.decide_escalation(state)["escalation_decision"]
+    return "escalation" if decision.should_escalate else "knowledge"
 
 
 def route_after_grounding(state: ConversationState) -> str:

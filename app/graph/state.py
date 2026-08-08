@@ -45,6 +45,7 @@ class ConversationState(TypedDict):
     rolling_sentiment: float
     clarification_count: int
     draft_answer: Optional[str]
+    retrieved_excerpts: list[str]
     grounding_result: Optional[GroundingResult]
     escalation_decision: Optional[EscalationDecision]
     final_response_text: Optional[str]

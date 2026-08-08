@@ -12,6 +12,7 @@ def state(transcript: str = "Where is my order?") -> ConversationState:
         "rolling_sentiment": 0.0,
         "clarification_count": 0,
         "draft_answer": None,
+        "retrieved_excerpts": [],
         "grounding_result": None,
         "escalation_decision": None,
         "final_response_text": None,

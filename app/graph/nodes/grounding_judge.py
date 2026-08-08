@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from app.config import settings
 from app.graph.state import ConversationState, GroundingResult
-from app.rag.retriever import retrieve
 
 JUDGE_SCHEMA = {
     "type": "object",
@@ -25,7 +24,7 @@ in the answer is directly supported by the excerpts. Any unsupported claim means
 
 def check_grounding(state: ConversationState) -> dict[str, GroundingResult]:
     """Read the transcript and draft; write `grounding_result`; never approve on validation error."""
-    excerpts = retrieve(state["current_transcript"])
+    excerpts = state["retrieved_excerpts"]
     excerpts_text = "\n---\n".join(excerpts)
     payload = (
         f"Question: {state['current_transcript']}\n\nRetrieved excerpts:\n"

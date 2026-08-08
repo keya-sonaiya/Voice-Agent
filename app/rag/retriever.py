@@ -21,14 +21,33 @@ def _documents() -> tuple[tuple[str, str], ...]:
     return tuple((path.name, path.read_text(encoding="utf-8")) for path in sorted(KB_DIR.glob("*.md")))
 
 
+@lru_cache(maxsize=1)
+def _embedding_model() -> object:
+    """Load the configured embedding model once per process."""
+    try:
+        SentenceTransformer = import_module("sentence_transformers").SentenceTransformer
+    except ModuleNotFoundError as error:
+        raise RuntimeError("Install requirements.txt before using hybrid retrieval.") from error
+    return SentenceTransformer(settings.embedding_model)
+
+
+@lru_cache(maxsize=1)
+def _bm25_index() -> object:
+    """Build the lexical index once because the bundled corpus is immutable at runtime."""
+    try:
+        BM25Okapi = import_module("rank_bm25").BM25Okapi
+    except ModuleNotFoundError as error:
+        raise RuntimeError("Install requirements.txt before using hybrid retrieval.") from error
+    return BM25Okapi([_tokenize(text) for _, text in _documents()])
+
+
 def _dense_documents(query: str, limit: int) -> list[str]:
     """Fetch dense matches from Chroma, with a local embedding fallback before ingest runs."""
     try:
         PersistentClient = import_module("chromadb").PersistentClient
-        SentenceTransformer = import_module("sentence_transformers").SentenceTransformer
         client = PersistentClient(path=settings.vector_db_path)
         collection = client.get_collection("support_kb")
-        model = SentenceTransformer(settings.embedding_model)
+        model = _embedding_model()
         query_embedding = model.encode([query], normalize_embeddings=True).tolist()
         result = collection.query(query_embeddings=query_embedding, n_results=limit, include=["documents"])
         documents = result.get("documents", [[]])
@@ -40,11 +59,7 @@ def _dense_documents(query: str, limit: int) -> list[str]:
     corpus = [text for _, text in _documents()]
     if not corpus:
         return []
-    try:
-        SentenceTransformer = import_module("sentence_transformers").SentenceTransformer
-    except ModuleNotFoundError as error:
-        raise RuntimeError("Install requirements.txt before using hybrid retrieval.") from error
-    model = SentenceTransformer(settings.embedding_model)
+    model = _embedding_model()
     vectors = model.encode([query, *corpus], normalize_embeddings=True)
     query_vector = vectors[0]
     scores = [(float(query_vector @ vector), text) for vector, text in zip(vectors[1:], corpus, strict=True)]
@@ -67,11 +82,7 @@ def retrieve(query: str, limit: int = 3) -> list[str]:
         return []
     source_by_text = {text: f"Source: {name}\n{text}" for name, text in source_documents}
     corpus = [text for _, text in source_documents]
-    try:
-        BM25Okapi = import_module("rank_bm25").BM25Okapi
-    except ModuleNotFoundError as error:
-        raise RuntimeError("Install requirements.txt before using hybrid retrieval.") from error
-    bm25 = BM25Okapi([_tokenize(text) for text in corpus])
+    bm25 = _bm25_index()
     lexical = [
         text
         for _, text in sorted(

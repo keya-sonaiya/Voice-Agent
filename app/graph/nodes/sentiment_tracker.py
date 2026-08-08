@@ -14,11 +14,19 @@ _NEGATIVE = {
     "worst",
 }
 _POSITIVE = {"appreciate", "great", "helpful", "thanks", "thank", "wonderful"}
+_NEGATORS = {"not", "no", "never", "don't", "doesn't", "isn't", "won't"}
 
 
 def _score(text: str) -> float:
-    words = {word.strip(".,!?;:").lower() for word in text.split()}
-    return max(-1.0, min(1.0, (len(words & _POSITIVE) - len(words & _NEGATIVE)) / 2))
+    words = [word.strip(".,!?;:").lower() for word in text.split()]
+    total = 0
+    for index, word in enumerate(words):
+        negated = index > 0 and words[index - 1] in _NEGATORS
+        if word in _POSITIVE:
+            total += -1 if negated else 1
+        elif word in _NEGATIVE:
+            total += 1 if negated else -1
+    return max(-1.0, min(1.0, total * 4 / max(len(words), 1)))
 
 
 def update_sentiment(state: ConversationState) -> dict[str, object]:

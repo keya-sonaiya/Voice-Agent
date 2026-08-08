@@ -44,9 +44,9 @@ def start_call(body: CallStart, request: Request) -> dict[str, str]:
 
 
 @app.websocket("/ws/audio/{session_id}")
-async def audio_gateway(websocket: WebSocket, session_id: str, token: str) -> None:
+async def audio_gateway(websocket: WebSocket, session_id: str) -> None:
     """Serve the persistent authenticated duplex audio connection."""
-    await serve_audio_socket(websocket, session_id, token)
+    await serve_audio_socket(websocket, session_id)
 
 
 @app.get("/internal/handoff/{session_id}")
