@@ -10,7 +10,7 @@ type CallState = {
   escalation: Escalation | null;
   response: string | null;
   addTranscript: (text: string) => void;
-  setResponse: (text: string, score: number) => void;
+  setResponse: (text: string, score?: number) => void;
   setEscalation: (payload: Escalation) => void;
 };
 
@@ -20,15 +20,18 @@ export const useCallStore = create<CallState>((set) => ({
   escalation: null,
   response: null,
   addTranscript: (text) =>
-    set((state) => ({ transcript: [...state.transcript, `Caller: ${text}`] })),
+    set((state) => {
+      const line = `Caller: ${text}`;
+      return state.transcript.at(-1) === line ? state : { transcript: [...state.transcript, line] };
+    }),
   setResponse: (text, score) =>
     set((state) => ({
       response: text,
       transcript: [...state.transcript, `Agent: ${text}`],
-      sentiment: [
-        ...state.sentiment,
-        { turn: state.sentiment.length + 1, score },
-      ],
+      sentiment:
+        typeof score === "number"
+          ? [...state.sentiment, { turn: state.sentiment.length + 1, score }]
+          : state.sentiment,
     })),
   setEscalation: (payload) => set({ escalation: payload }),
 }));

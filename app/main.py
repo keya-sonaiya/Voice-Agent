@@ -1,6 +1,7 @@
 """FastAPI entrypoint and protected WebSocket routes."""
 
 import hmac
+import logging
 import uuid
 
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
@@ -12,6 +13,11 @@ from app.config import settings
 from app.escalation.handoff import build_handoff_payload
 from app.security.auth import issue_call_token
 from app.security.rate_limit import enforce_rate_limit
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 app = FastAPI(title="Voice-Driven Customer Support Agent")
 app.add_middleware(

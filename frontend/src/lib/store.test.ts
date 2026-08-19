@@ -9,4 +9,13 @@ describe("call store", () => {
       score: -0.2,
     });
   });
+
+  it("does not duplicate an identical caller event", () => {
+    useCallStore.getState().addTranscript("Where is my order?");
+    useCallStore.getState().addTranscript("Where is my order?");
+    const entries = useCallStore
+      .getState()
+      .transcript.filter((entry) => entry === "Caller: Where is my order?");
+    expect(entries).toHaveLength(1);
+  });
 });

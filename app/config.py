@@ -3,7 +3,7 @@
 import json
 from typing import Any, Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -48,8 +48,10 @@ class Settings(BaseSettings):
     whisper_model: str = "base.en"
     whisper_device: Literal["auto", "cpu", "cuda"] = "auto"
     whisper_compute_type: str = "int8"
-    tts_provider: str = "coqui"
+    tts_provider: Literal["coqui", "elevenlabs"] = "coqui"
     elevenlabs_api_key: str | None = None
+    elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
+    elevenlabs_model_id: str = "eleven_multilingual_v2"
     vector_db_path: str = "./data/chroma"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     database_url: str = "sqlite:///./sessions.db"
@@ -57,6 +59,9 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["http://localhost:3000"]
     rate_limit_per_minute: int = 60
     max_call_duration_seconds: int = 900
+    environment: str = "development"
+    log_level: str = "INFO"
+    debug_logging: bool = False
 
     @classmethod
     def settings_customise_sources(
@@ -93,6 +98,13 @@ class Settings(BaseSettings):
         if not origins:
             raise ValueError("ALLOWED_ORIGINS must include at least one origin.")
         return origins
+
+    @model_validator(mode="after")
+    def validate_tts_configuration(self) -> "Settings":
+        """Fail application startup instead of silently changing a selected TTS provider."""
+        if self.tts_provider == "elevenlabs" and not self.elevenlabs_api_key:
+            raise ValueError("ELEVENLABS_API_KEY is required when TTS_PROVIDER=elevenlabs.")
+        return self
 
 
 # Pydantic reads these required values from its configured environment source at runtime.

@@ -11,7 +11,7 @@ events.
    `API_AUTH_SECRET`. Do not commit `.env`.
 2. Create a Python 3.12 virtual environment and run `pip install -r requirements.txt`.
 3. Run `python -m app.rag.ingest` to build the persistent Chroma index, then run
-   `uvicorn app.main:app --reload`.
+   `python scripts/init_db.py`, then run `uvicorn app.main:app --reload`.
 4. In `frontend`, copy `.env.local.example` to `.env.local`, run `npm install`, then
    `npm run dev`.
 
@@ -30,3 +30,10 @@ Backend: `ruff check app/ tests/`, `black --check app/ tests/`, `mypy app/`,
 
 Frontend: `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`, and
 `npm audit --omit=dev`.
+
+## Telecom demo database
+
+The application extends its existing SQLModel/SQLite database with a relational telecom
+support schema seeded from IBM Telco Customer Churn plus deterministic synthetic
+operational records. See [the database guide](docs/telecom_database.md) for source
+mapping, generated-data boundaries, secure tool APIs, and reset instructions.

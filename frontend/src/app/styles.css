@@ -39,6 +39,13 @@ h2 {
   border-radius: 16px;
   padding: 22px;
 }
+.notice {
+  border: 1px solid #e7ab50;
+  border-radius: 10px;
+  color: #ffe1ab;
+  margin: 0 0 18px;
+  padding: 12px 16px;
+}
 .controls,
 .actions {
   display: flex;

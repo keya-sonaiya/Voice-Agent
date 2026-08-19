@@ -33,19 +33,36 @@ class EscalationDecision(BaseModel):
         "repeated_clarification",
         "explicit_human_request",
         "grounding_failure",
+        "system_failure",
         "none",
     ]
 
 
 class ConversationState(TypedDict):
     session_id: str
+    authenticated_caller_id: Optional[str]
     turns: list[Turn]
     current_transcript: str
     intent_result: Optional[IntentResult]
+    previous_intent: Optional[IntentResult]
     rolling_sentiment: float
     clarification_count: int
+    awaiting_clarification: bool
+    clarification_topic: Optional[str]
+    clarification_resolved: bool
+    customer_id: Optional[str]
+    customer_verified: bool
+    support_intent: Optional[str]
+    current_payment_id: Optional[str]
+    current_invoice_id: Optional[str]
+    current_order_id: Optional[str]
+    current_ticket_id: Optional[str]
+    awaiting_customer_verification: bool
+    awaiting_payment_id: bool
     draft_answer: Optional[str]
     retrieved_excerpts: list[str]
     grounding_result: Optional[GroundingResult]
     escalation_decision: Optional[EscalationDecision]
     final_response_text: Optional[str]
+    system_failure: Optional[str]
+    response_mode: Optional[Literal["knowledge", "conversation", "clarification", "support_workflow"]]

@@ -5,10 +5,23 @@ from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from string import punctuation
+from typing import Any, Protocol, cast
 
 from app.config import settings
 
 KB_DIR = Path(__file__).parent / "kb"
+
+
+class EmbeddingModel(Protocol):
+    """The small surface used from the optional sentence-transformers dependency."""
+
+    def encode(self, sentences: list[str], *, normalize_embeddings: bool) -> Any: ...
+
+
+class LexicalIndex(Protocol):
+    """The small surface used from the optional rank-bm25 dependency."""
+
+    def get_scores(self, query_tokens: list[str]) -> Any: ...
 
 
 def _tokenize(text: str) -> list[str]:
@@ -22,23 +35,23 @@ def _documents() -> tuple[tuple[str, str], ...]:
 
 
 @lru_cache(maxsize=1)
-def _embedding_model() -> object:
+def _embedding_model() -> EmbeddingModel:
     """Load the configured embedding model once per process."""
     try:
         SentenceTransformer = import_module("sentence_transformers").SentenceTransformer
     except ModuleNotFoundError as error:
         raise RuntimeError("Install requirements.txt before using hybrid retrieval.") from error
-    return SentenceTransformer(settings.embedding_model)
+    return cast(EmbeddingModel, SentenceTransformer(settings.embedding_model))
 
 
 @lru_cache(maxsize=1)
-def _bm25_index() -> object:
+def _bm25_index() -> LexicalIndex:
     """Build the lexical index once because the bundled corpus is immutable at runtime."""
     try:
         BM25Okapi = import_module("rank_bm25").BM25Okapi
     except ModuleNotFoundError as error:
         raise RuntimeError("Install requirements.txt before using hybrid retrieval.") from error
-    return BM25Okapi([_tokenize(text) for _, text in _documents()])
+    return cast(LexicalIndex, BM25Okapi([_tokenize(text) for _, text in _documents()]))
 
 
 def _dense_documents(query: str, limit: int) -> list[str]:

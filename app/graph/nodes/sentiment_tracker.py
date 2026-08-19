@@ -1,5 +1,6 @@
 """Deterministic rolling sentiment tracker."""
 
+from app.call_logging import call_log
 from app.graph.state import ConversationState
 
 _NEGATIVE = {
@@ -36,4 +37,10 @@ def update_sentiment(state: ConversationState) -> dict[str, object]:
     rolling = (state["rolling_sentiment"] + score) / 2
     last_turn = state["turns"][-1].model_copy(update={"sentiment_score": score})
     turns = [*state["turns"][:-1], last_turn]
+    call_log(
+        state["session_id"],
+        "SENTIMENT",
+        "complete",
+        details={"turn_score": score, "rolling_score": rolling},
+    )
     return {"rolling_sentiment": rolling, "turns": turns}
