@@ -61,7 +61,17 @@ def serialize_state(state: ConversationState) -> str:
         "clarification_topic": state["clarification_topic"],
         "clarification_resolved": state["clarification_resolved"],
         "customer_id": state["customer_id"],
+        "customer_identified": state["customer_identified"],
         "customer_verified": state["customer_verified"],
+        "identity_state": state["identity_state"],
+        "verification_method": state["verification_method"],
+        "verification_timestamp": state["verification_timestamp"],
+        "awaiting_customer_name": state["awaiting_customer_name"],
+        "awaiting_customer_phone": state["awaiting_customer_phone"],
+        "awaiting_customer_email": state["awaiting_customer_email"],
+        "account_recovery_active": state["account_recovery_active"],
+        "account_recovery_attempts": state["account_recovery_attempts"],
+        "recovery_candidate_ids": state["recovery_candidate_ids"],
         "support_intent": state["support_intent"],
         "current_payment_id": state["current_payment_id"],
         "current_invoice_id": state["current_invoice_id"],
@@ -121,7 +131,17 @@ def load_latest_state(session_id: str) -> ConversationState | None:
     data.setdefault("clarification_topic", None)
     data.setdefault("clarification_resolved", False)
     data.setdefault("customer_id", None)
+    data.setdefault("customer_identified", bool(data.get("customer_id")))
     data.setdefault("customer_verified", False)
+    data.setdefault("identity_state", "verified" if data.get("customer_verified") else "identified" if data.get("customer_identified") else "unidentified")
+    data.setdefault("verification_method", None)
+    data.setdefault("verification_timestamp", None)
+    data.setdefault("awaiting_customer_name", False)
+    data.setdefault("awaiting_customer_phone", False)
+    data.setdefault("awaiting_customer_email", False)
+    data.setdefault("account_recovery_active", False)
+    data.setdefault("account_recovery_attempts", 0)
+    data.setdefault("recovery_candidate_ids", [])
     data.setdefault("support_intent", None)
     data.setdefault("current_payment_id", None)
     data.setdefault("current_invoice_id", None)

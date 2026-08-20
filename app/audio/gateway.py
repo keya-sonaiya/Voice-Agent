@@ -62,7 +62,17 @@ def initial_state(session_id: str, authenticated_caller_id: str | None = None) -
         "clarification_topic": None,
         "clarification_resolved": False,
         "customer_id": None,
+        "customer_identified": False,
         "customer_verified": False,
+        "identity_state": "unidentified",
+        "verification_method": None,
+        "verification_timestamp": None,
+        "awaiting_customer_name": False,
+        "awaiting_customer_phone": False,
+        "awaiting_customer_email": False,
+        "account_recovery_active": False,
+        "account_recovery_attempts": 0,
+        "recovery_candidate_ids": [],
         "support_intent": None,
         "current_payment_id": None,
         "current_invoice_id": None,
@@ -164,6 +174,7 @@ async def serve_audio_socket(websocket: WebSocket, session_id: str) -> None:
     caller_claim = claims.get("caller_id")
     authenticated_caller_id = caller_claim if isinstance(caller_claim, str) else None
     state = initial_state(session_id, authenticated_caller_id)
+    call_log(session_id, "IDENTITY", "state", details={"identity_state": state["identity_state"]})
     record_transition_safely("session_started", state)
     started = monotonic()
     transcriber = StreamingTranscriber(session_id)

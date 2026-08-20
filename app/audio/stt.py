@@ -14,6 +14,7 @@ from app.call_logging import call_exception, call_log, duration_ms
 from app.config import settings
 
 _DLL_DIRECTORY_HANDLES: list[object] = []
+_WHISPER_MODEL: WhisperModel | None = None
 
 
 def _configure_windows_cuda_dlls() -> None:
@@ -40,13 +41,25 @@ def _configure_windows_cuda_dlls() -> None:
         os.environ["PATH"] = os.pathsep.join([*dll_directories, os.environ.get("PATH", "")])
 
 
+def warm_whisper_model() -> WhisperModel:
+    """Load the process-wide Whisper model during application startup."""
+    global _WHISPER_MODEL
+    if _WHISPER_MODEL is None:
+        _configure_windows_cuda_dlls()
+        _WHISPER_MODEL = WhisperModel(
+            settings.whisper_model,
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
+        )
+    return _WHISPER_MODEL
+
+
 class StreamingTranscriber:
     """Accumulates PCM frames received on one persistent WebSocket session."""
 
     def __init__(self, session_id: str = "unknown") -> None:
         self.session_id = session_id
         self._chunks: list[bytes] = []
-        self._model: WhisperModel | None = None
         self._vad = webrtcvad.Vad(2)
         self._vad_remainder = b""
         self.audio_frame_count = 0
@@ -97,23 +110,12 @@ class StreamingTranscriber:
             details={"audio_bytes": len(audio), "frame_count": self.audio_frame_count},
         )
         try:
-            if self._model is None:
-                call_log(
-                    self.session_id,
-                    "STT",
-                    "model_initializing",
-                    details={"model": settings.whisper_model, "device": settings.whisper_device},
-                )
-                _configure_windows_cuda_dlls()
-                self._model = WhisperModel(
-                    settings.whisper_model,
-                    device=settings.whisper_device,
-                    compute_type=settings.whisper_compute_type,
-                )
-                call_log(self.session_id, "STT", "model_initialized")
+            model = _WHISPER_MODEL
+            if model is None:
+                raise RuntimeError("Whisper is not ready; application startup has not completed.")
             samples = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
             segments: Iterable[object]
-            segments, _ = self._model.transcribe(
+            segments, _ = model.transcribe(
                 samples,
                 language="en",
                 beam_size=5,

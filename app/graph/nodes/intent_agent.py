@@ -11,6 +11,17 @@ from app.call_logging import call_exception, call_log, duration_ms
 from app.config import settings
 from app.graph.state import ConversationState, IntentResult
 
+_LLM_CLIENT: Client | None = None
+_LLM_CLIENT_CLASS: type[Client] | None = None
+
+
+def get_llm_client() -> Client:
+    global _LLM_CLIENT, _LLM_CLIENT_CLASS
+    if _LLM_CLIENT is None or _LLM_CLIENT_CLASS is not Client:
+        _LLM_CLIENT = Client(host=settings.ollama_host, headers={"Authorization": f"Bearer {settings.ollama_api_key}"})
+        _LLM_CLIENT_CLASS = Client
+    return _LLM_CLIENT
+
 INTENT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -113,6 +124,12 @@ def _compact_conversation_context(state: ConversationState) -> str:
 
 def _classify_known_support_phrase(transcript: str) -> IntentResult | None:
     """Resolve unmistakable taxonomy phrases without requiring provider interpretation."""
+    if re.search(r"\b(?:forgot|don't know|do not know|lost)\b.{0,30}\b(?:customer|account)\s+id\b", transcript, re.I):
+        return IntentResult(
+            intent="account_access",
+            confidence=0.99,
+            reasoning="Matched deterministic customer-ID recovery phrase.",
+        )
     for intent, pattern in _SUPPORT_PHRASE_PATTERNS:
         if pattern.search(transcript):
             return IntentResult(
@@ -179,11 +196,7 @@ def classify_intent(state: ConversationState) -> dict[str, object]:
             "system_failure": None,
         }
     try:
-        client = Client(
-            host=settings.ollama_host,
-            headers={"Authorization": f"Bearer {settings.ollama_api_key}"},
-        )
-        response = client.chat(
+        response = get_llm_client().chat(
             model=settings.intent_model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},

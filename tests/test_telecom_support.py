@@ -8,6 +8,7 @@ from sqlmodel import Session
 from app.graph import build_graph as graph_module
 from app.graph.nodes import support_workflow
 from app.graph.state import GroundingResult, IntentResult
+from app.identifiers import normalize_identifier
 from app.persistence.models import Customer, Payment, SourceCustomerRecord
 from app.persistence.telecom_seed import build_engine, initialize_telecom_database
 from app.tools import customer_support
@@ -46,10 +47,28 @@ def test_source_rows_are_preserved_and_mapped_to_deterministic_support_customers
 
 def test_identity_verification_and_owned_payment_lookup(support_tools: None) -> None:
     assert customer_support.verify_customer_identity("CUST1024", "Samad Sama") is True
+    assert customer_support.verify_customer_identity("CUST1024", "S-A-M-A-D-S-A-M-A") is True
     assert customer_support.verify_customer_identity("CUST1024", "Wrong Name") is False
+    assert customer_support.verify_customer_identity("CUST1024", "S-A-M-A-D-S-A-M-B") is False
     payment = customer_support.get_payment("PAY102938", "CUST1024", "CUST1024")
     assert payment["status"] == "declined"
     assert payment["failure_reason"] == "Issuer declined the transaction."
+
+
+@pytest.mark.parametrize(
+    ("value", "identifier_type", "expected"),
+    [
+        ("CUST1024", "customer_id", "CUST1024"),
+        ("C U S T 1 0 2 4", "customer_id", "CUST1024"),
+        ("cust 1024", "customer_id", "CUST1024"),
+        ("C-U-S-T-1-0-2-4", "customer_id", "CUST1024"),
+        ("P A Y 1 0 2 9 3 8", "payment_id", "PAY102938"),
+        ("one zero two four", "customer_id", "1024"),
+        ("oh one two four", "customer_id", "0124"),
+    ],
+)
+def test_normalize_identifier(value: str, identifier_type: str, expected: str) -> None:
+    assert normalize_identifier(value, identifier_type) == expected  # type: ignore[arg-type]
 
 
 def test_unauthorized_or_malformed_lookups_do_not_disclose_records(support_tools: None) -> None:
@@ -85,7 +104,7 @@ def test_payment_conversation_requires_verification_then_uses_owned_record(
     current = {**current, **first, "current_transcript": "CUST1024"}
     second = support_workflow.handle_support_turn(current)
     assert second is not None and "name on the account" in second["draft_answer"]
-    current = {**current, **second, "current_transcript": "Samad Sama"}
+    current = {**current, **second, "current_transcript": "S-A-M-A-D-S-A-M-A"}
     third = support_workflow.handle_support_turn(current)
     assert third is not None and "verified your account" in third["draft_answer"]
     current = {**current, **third, "current_transcript": "PAY102938"}
@@ -93,6 +112,90 @@ def test_payment_conversation_requires_verification_then_uses_owned_record(
     assert fourth is not None
     assert "declined" in fourth["draft_answer"]
     assert fourth["retrieved_excerpts"]
+
+
+def test_forgot_customer_id_requires_name_and_second_factor(
+    monkeypatch: pytest.MonkeyPatch, seeded_engine: object
+) -> None:
+    monkeypatch.setattr(customer_support, "engine", seeded_engine)
+    current = {**state("I forgot my customer ID."), "intent_result": IntentResult(intent="account_access", confidence=0.99)}
+    first = support_workflow.handle_support_turn(current)
+    assert first is not None
+    assert first["account_recovery_active"] is True
+    assert "name on the account" in first["draft_answer"]
+    current = {**current, **first, "current_transcript": "Samad Sama"}
+    second = support_workflow.handle_support_turn(current)
+    assert second is not None
+    assert "phone number or email" in second["draft_answer"]
+    current = {**current, **second, "current_transcript": "+1-555-1024"}
+    third = support_workflow.handle_support_turn(current)
+    assert third is not None
+    assert third["customer_id"] == "CUST1024"
+    assert third["customer_verified"] is True
+    assert third["account_recovery_active"] is False
+
+
+def test_recovery_name_alone_does_not_verify_and_bad_factor_retries(
+    monkeypatch: pytest.MonkeyPatch, seeded_engine: object
+) -> None:
+    monkeypatch.setattr(customer_support, "engine", seeded_engine)
+    current = {**state("I forgot my customer ID."), "intent_result": IntentResult(intent="account_access", confidence=0.99)}
+    first = support_workflow.handle_support_turn(current)
+    current = {**current, **first, "current_transcript": "Samad Sama"}
+    second = support_workflow.handle_support_turn(current)
+    assert second is not None and "phone number or email" in second["draft_answer"]
+    current = {**current, **second, "current_transcript": "wrong@example.invalid"}
+    third = support_workflow.handle_support_turn(current)
+    assert third is not None and "couldn't verify" in third["draft_answer"]
+
+
+def test_verified_identity_is_reused_for_later_payment_request(
+    monkeypatch: pytest.MonkeyPatch, seeded_engine: object
+) -> None:
+    monkeypatch.setattr(customer_support, "engine", seeded_engine)
+    current = {**state("payment trouble"), "intent_result": IntentResult(intent="billing", confidence=0.99)}
+    first = support_workflow.handle_support_turn(current)
+    current = {**current, **first, "current_transcript": "CUST1024"}
+    second = support_workflow.handle_support_turn(current)
+    current = {**current, **second, "current_transcript": "Samad Sama"}
+    verified = support_workflow.handle_support_turn(current)
+    assert verified is not None and verified["customer_verified"] is True
+    later = {**current, **verified, "current_transcript": "I have another payment issue."}
+    reused = support_workflow.handle_support_turn(later)
+    assert reused is not None
+    assert "customer ID" not in reused["draft_answer"]
+
+
+def test_new_session_starts_unidentified() -> None:
+    from app.audio.gateway import initial_state
+
+    fresh = initial_state("new-session")
+    assert fresh["identity_state"] == "unidentified"
+    assert fresh["customer_verified"] is False
+
+
+def test_spoken_identifier_payment_conversation_matches_typed_flow(
+    monkeypatch: pytest.MonkeyPatch, seeded_engine: object
+) -> None:
+    monkeypatch.setattr(customer_support, "engine", seeded_engine)
+    current = {
+        **state("I am having some troubles with my payment."),
+        "intent_result": IntentResult(intent="billing", confidence=0.98),
+    }
+    first = support_workflow.handle_support_turn(current)
+    assert first is not None and "customer ID" in first["draft_answer"]
+    current = {**current, **first, "current_transcript": "C U S T 1 0 2 4"}
+    second = support_workflow.handle_support_turn(current)
+    assert second is not None and second["customer_id"] == "CUST1024"
+    assert "name on the account" in second["draft_answer"]
+    current = {**current, **second, "current_transcript": "Samad Sama"}
+    third = support_workflow.handle_support_turn(current)
+    assert third is not None and "verified your account" in third["draft_answer"]
+    current = {**current, **third, "current_transcript": "P A Y 1 0 2 9 3 8"}
+    fourth = support_workflow.handle_support_turn(current)
+    assert fourth is not None
+    assert fourth["current_payment_id"] == "PAY102938"
+    assert "Payment PAY102938 was declined" in fourth["draft_answer"]
 
 
 def test_payment_workflow_reaches_graph_response_after_authorized_lookup(

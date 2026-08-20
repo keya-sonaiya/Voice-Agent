@@ -14,6 +14,17 @@ from app.graph.nodes.conversation_agent import is_deterministic_conversation_res
 from app.graph.nodes.support_workflow import is_deterministic_support_prompt
 from app.graph.state import ConversationState, GroundingResult
 
+_LLM_CLIENT: Client | None = None
+_LLM_CLIENT_CLASS: type[Client] | None = None
+
+
+def get_llm_client() -> Client:
+    global _LLM_CLIENT, _LLM_CLIENT_CLASS
+    if _LLM_CLIENT is None or _LLM_CLIENT_CLASS is not Client:
+        _LLM_CLIENT = Client(host=settings.ollama_host, headers={"Authorization": f"Bearer {settings.ollama_api_key}"})
+        _LLM_CLIENT_CLASS = Client
+    return _LLM_CLIENT
+
 JUDGE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -92,17 +103,13 @@ def check_grounding(state: ConversationState) -> dict[str, object]:
         f"{excerpts_text}\n\nDraft answer: {state['draft_answer']}"
     )
     try:
-        client = Client(
-            host=settings.ollama_host,
-            headers={"Authorization": f"Bearer {settings.ollama_api_key}"},
-        )
         call_log(
             state["session_id"],
             "GROUNDING",
             "model_request",
             details={"model": settings.grounding_judge_model, "structured_output": True, "schema_mode": "json_schema"},
         )
-        response = client.chat(
+        response = get_llm_client().chat(
             model=settings.grounding_judge_model,
             messages=[
                 {"role": "system", "content": JUDGE_PROMPT},

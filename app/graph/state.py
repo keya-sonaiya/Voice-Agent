@@ -51,7 +51,17 @@ class ConversationState(TypedDict):
     clarification_topic: Optional[str]
     clarification_resolved: bool
     customer_id: Optional[str]
+    customer_identified: bool
     customer_verified: bool
+    identity_state: Literal["unidentified", "identified", "verified"]
+    verification_method: Optional[str]
+    verification_timestamp: Optional[str]
+    awaiting_customer_name: bool
+    awaiting_customer_phone: bool
+    awaiting_customer_email: bool
+    account_recovery_active: bool
+    account_recovery_attempts: int
+    recovery_candidate_ids: list[str]
     support_intent: Optional[str]
     current_payment_id: Optional[str]
     current_invoice_id: Optional[str]

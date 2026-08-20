@@ -10,6 +10,7 @@ from typing import Any, Protocol, cast
 from app.config import settings
 
 KB_DIR = Path(__file__).parent / "kb"
+_VECTOR_CLIENT: Any | None = None
 
 
 class EmbeddingModel(Protocol):
@@ -44,6 +45,22 @@ def _embedding_model() -> EmbeddingModel:
     return cast(EmbeddingModel, SentenceTransformer(settings.embedding_model))
 
 
+def _vector_collection() -> Any:
+    global _VECTOR_CLIENT
+    if _VECTOR_CLIENT is None:
+        PersistentClient = import_module("chromadb").PersistentClient
+        _VECTOR_CLIENT = PersistentClient(path=settings.vector_db_path)
+    return _VECTOR_CLIENT.get_or_create_collection("support_kb")
+
+
+def warm_retriever() -> None:
+    """Load retrieval resources and perform one local embedding without a model call."""
+    _documents()
+    _bm25_index()
+    _embedding_model().encode(["health check"], normalize_embeddings=True)
+    _vector_collection()
+
+
 @lru_cache(maxsize=1)
 def _bm25_index() -> LexicalIndex:
     """Build the lexical index once because the bundled corpus is immutable at runtime."""
@@ -57,9 +74,7 @@ def _bm25_index() -> LexicalIndex:
 def _dense_documents(query: str, limit: int) -> list[str]:
     """Fetch dense matches from Chroma, with a local embedding fallback before ingest runs."""
     try:
-        PersistentClient = import_module("chromadb").PersistentClient
-        client = PersistentClient(path=settings.vector_db_path)
-        collection = client.get_collection("support_kb")
+        collection = _vector_collection()
         model = _embedding_model()
         query_embedding = model.encode([query], normalize_embeddings=True).tolist()
         result = collection.query(query_embeddings=query_embedding, n_results=limit, include=["documents"])

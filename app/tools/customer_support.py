@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 from sqlmodel import Session, SQLModel, select
 
 from app.call_logging import call_exception, call_log
+from app.identifiers import mask_identifier, normalize_spelled_name
 from app.persistence.models import (
     BillingAccount,
     Customer,
@@ -50,6 +51,58 @@ def _normalise_customer_id(customer_id: str) -> str:
     return value
 
 
+def validate_customer_id(customer_id: str, *, session_id: str = "system") -> str:
+    """Validate a normalized customer ID before any customer-specific lookup."""
+    try:
+        value = _normalise_customer_id(customer_id)
+    except ToolValidationError:
+        call_log(session_id, "IDENTIFIER", "validation", details={"type": "customer_id", "valid": False})
+        raise
+    call_log(session_id, "IDENTIFIER", "validation_success", details={"type": "customer_id", "valid": True})
+    return value
+
+
+def find_customer_candidates(name: str, *, session_id: str = "system") -> list[str]:
+    """Return internal candidate IDs for an exact name match; callers must add a second factor."""
+    supplied_name = " ".join(name.strip().casefold().split())
+    if not supplied_name or len(supplied_name) > 120:
+        raise ToolValidationError("Invalid account name")
+    spelled_name = normalize_spelled_name(name)
+    with Session(engine) as session:
+        records = session.exec(select(Customer).where(Customer.full_name.is_not(None))).all()
+    candidates = [
+        record.customer_id
+        for record in records
+        if supplied_name == " ".join(record.full_name.casefold().split())
+        or (spelled_name is not None and spelled_name == record.full_name.casefold().replace(" ", ""))
+    ]
+    call_log(session_id, "IDENTITY", "candidate_search", details={"candidate_count": len(candidates)})
+    return candidates
+
+
+def verify_recovery_candidate(
+    candidate_ids: list[str], contact: str, *, session_id: str = "system"
+) -> str | None:
+    """Verify an exact phone or email factor against the name-scoped candidate set."""
+    value = contact.strip().casefold()
+    phone_digits = re.sub(r"\D", "", contact)
+    if not value or len(value) > 160:
+        raise ToolValidationError("Invalid verification factor")
+    with Session(engine) as session:
+        records = [session.get(Customer, customer_id) for customer_id in candidate_ids]
+    matches = [
+        record.customer_id
+        for record in records
+        if record is not None
+        and ((record.email and record.email.casefold() == value) or (record.phone and re.sub(r"\D", "", record.phone) == phone_digits))
+    ]
+    if len(matches) == 1:
+        call_log(session_id, "IDENTITY", "verification_success", details={"verification_method": "contact"})
+        return matches[0]
+    call_log(session_id, "IDENTITY", "verification_failed", details={"candidate_count": len(matches)})
+    return None
+
+
 def _normalise_resource_id(resource_id: str, prefix: str) -> str:
     value = resource_id.strip().upper()
     if not value.startswith(prefix) or not _RESOURCE_ID.fullmatch(value):
@@ -60,7 +113,7 @@ def _normalise_resource_id(resource_id: str, prefix: str) -> str:
 def _authorize(session_id: str, authenticated_customer_id: str, requested_customer_id: str, resource: str) -> str:
     authenticated = _normalise_customer_id(authenticated_customer_id)
     requested = _normalise_customer_id(requested_customer_id)
-    call_log(session_id, "AUTHZ", "checking", details={"customer_id": requested, "resource": resource})
+    call_log(session_id, "AUTHZ", "checking", details={"customer_id": mask_identifier(requested), "resource": resource})
     if authenticated != requested:
         call_log(session_id, "AUTHZ", "denied", level=30, details={"reason": "customer_mismatch", "resource": resource})
         raise ToolAccessDenied("Authenticated customer does not own requested customer ID")
@@ -91,6 +144,7 @@ def _run_tool(session_id: str, tool: str, operation: Callable[[], dict[str, Any]
         raise ToolError("Database lookup failed") from None
     call_log(session_id, "DB", "query_complete", details={"rows": 1, "tool": tool})
     call_log(session_id, "TOOL", "complete", details={"tool": tool})
+    call_log(session_id, "TOOL", f"{tool}_complete", details={"tool": tool})
     return result
 
 
@@ -100,11 +154,16 @@ def verify_customer_identity(customer_id: str, name: str, *, session_id: str = "
     supplied_name = " ".join(name.strip().casefold().split())
     if not supplied_name or len(supplied_name) > 120:
         raise ToolValidationError("Invalid account name")
+    spelled_name = normalize_spelled_name(name)
 
     def operation() -> dict[str, bool]:
         with Session(engine) as session:
             record = session.get(Customer, customer)
-            matches = record is not None and supplied_name == " ".join(record.full_name.casefold().split())
+            stored_name = " ".join(record.full_name.casefold().split()) if record else ""
+            matches = record is not None and (
+                supplied_name == stored_name
+                or (spelled_name is not None and spelled_name == stored_name.replace(" ", ""))
+            )
             return {"verified": matches}
 
     return bool(_run_tool(session_id, "verify_customer_identity", operation)["verified"])

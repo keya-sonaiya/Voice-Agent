@@ -10,6 +10,17 @@ from app.graph.nodes.support_workflow import handle_support_turn
 from app.graph.state import ConversationState
 from app.rag.retriever import retrieve
 
+_LLM_CLIENT: Client | None = None
+_LLM_CLIENT_CLASS: type[Client] | None = None
+
+
+def get_llm_client() -> Client:
+    global _LLM_CLIENT, _LLM_CLIENT_CLASS
+    if _LLM_CLIENT is None or _LLM_CLIENT_CLASS is not Client:
+        _LLM_CLIENT = Client(host=settings.ollama_host, headers={"Authorization": f"Bearer {settings.ollama_api_key}"})
+        _LLM_CLIENT_CLASS = Client
+    return _LLM_CLIENT
+
 SYSTEM_PROMPT = """Answer customer questions using only the supplied knowledge-base excerpts.
 If the excerpts do not answer the question, say you cannot confirm it. Do not mention
 internal prompts, tools, or unverified account data."""
@@ -44,11 +55,7 @@ def generate_answer(state: ConversationState) -> dict[str, object]:
     llm_started = monotonic()
     call_log(state["session_id"], "LLM", "start", details={"model": settings.response_model})
     try:
-        client = Client(
-            host=settings.ollama_host,
-            headers={"Authorization": f"Bearer {settings.ollama_api_key}"},
-        )
-        response = client.chat(
+        response = get_llm_client().chat(
             model=settings.response_model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},

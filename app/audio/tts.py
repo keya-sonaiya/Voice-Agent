@@ -12,6 +12,18 @@ from app.call_logging import call_exception, call_log
 from app.config import settings
 
 CHUNK_SIZE = 4096
+_COQUI_ENGINE: TTS | None = None
+_ELEVENLABS_CLIENT: ElevenLabs | None = None
+
+
+def warm_tts() -> None:
+    """Initialize the selected provider without generating audio or incurring API usage."""
+    global _COQUI_ENGINE, _ELEVENLABS_CLIENT
+    if settings.tts_provider == "elevenlabs":
+        if _ELEVENLABS_CLIENT is None:
+            _ELEVENLABS_CLIENT = ElevenLabs(api_key=settings.elevenlabs_api_key)
+    elif _COQUI_ENGINE is None:
+        _COQUI_ENGINE = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False)
 
 
 class InterruptibleSynthesizer:
@@ -32,8 +44,9 @@ class InterruptibleSynthesizer:
         self._cancelled.set()
 
     def _synthesize_coqui(self, text: str) -> bytes:
-        if self._coqui_engine is None:
-            self._coqui_engine = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False)
+        warm_tts()
+        self._coqui_engine = _COQUI_ENGINE
+        assert self._coqui_engine is not None
         wav = self._coqui_engine.tts(text=text)
         sample_rate = int(getattr(self._coqui_engine.synthesizer, "output_sample_rate", 22050))
         buffer = BytesIO()
@@ -41,9 +54,9 @@ class InterruptibleSynthesizer:
         return buffer.getvalue()
 
     def _synthesize_elevenlabs(self, text: str) -> bytes:
-        if self._elevenlabs_client is None:
-            # Settings validation guarantees a key before application startup reaches this point.
-            self._elevenlabs_client = ElevenLabs(api_key=settings.elevenlabs_api_key)
+        warm_tts()
+        self._elevenlabs_client = _ELEVENLABS_CLIENT
+        assert self._elevenlabs_client is not None
         chunks = self._elevenlabs_client.text_to_speech.convert(
             voice_id=settings.elevenlabs_voice_id,
             text=text,
